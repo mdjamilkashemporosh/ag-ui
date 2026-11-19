@@ -25,7 +25,11 @@ reply — is streamed to the browser as a typed AG-UI event, and rendered twice:
 2. As a raw event log you can read line by line.
 
 ---
+## Demo 
+<img width="1000" height="375" alt="image" src="https://github.com/user-attachments/assets/4832b0b9-eb7d-45b9-91bb-4afe77f1a727" />
+<img width="1000" height="464" alt="image" src="https://github.com/user-attachments/assets/3981da8a-e6d6-45f9-83e9-0939a8fcb92a" />
 
+---
 ## How it works
 
 ```mermaid
