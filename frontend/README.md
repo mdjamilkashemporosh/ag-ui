@@ -1,36 +1,130 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# frontend
 
-## Getting Started
+The Next.js client for the [AG-UI LangGraph Agent](../README.md).
 
-First, run the development server:
+This half is where AG-UI actually lives: the API route translates LangGraph's stream into
+AG-UI events, and the browser renders them.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+---
+
+## Structure
+
+| File                                      | Role                                                                         |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `app/layout.tsx`                          | CopilotKit provider — `runtimeUrl="/api/copilotkit"`, `agent="sample_agent"` |
+| `app/api/copilotkit/[[...slug]]/route.ts` | Registers the agent, exports the AG-UI handler                               |
+| `app/page.tsx`                            | Layout, events-panel toggle                                                  |
+| `app/components/chat.tsx`                 | Chat transcript, status line, tool cards                                     |
+| `app/components/ag-ui-panel.tsx`          | Live AG-UI event log                                                         |
+| `app/components/chat.css`                 | Chat styling                                                                 |
+
+`app/api/copilotkit/[[...slug]]/route.ts` is the only place the frontend imports
+`@ag-ui/langgraph`:
+
+```ts
+const runtime = new CopilotRuntime({
+  agents: {
+    sample_agent: new LangGraphAgent({
+      deploymentUrl:
+        process.env.LANGGRAPH_DEPLOYMENT_URL || "http://localhost:8123",
+      graphId: "sample_agent",
+    }),
+  },
+  runner: new InMemoryAgentRunner(),
+});
+
+const handler = createCopilotRuntimeHandler({
+  runtime,
+  basePath: "/api/copilotkit",
+});
+export const GET = handler;
+export const POST = handler;
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Everything below the browser is handled by CopilotKit and AG-UI: one POST stays open and
+events arrive over SSE. No polling, no websocket.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How a run flows through the client
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. `chat.tsx` appends the user message and calls `copilotkit.runAgent({ agent })`.
+2. `@ag-ui/client` `POST`s to `/api/copilotkit` and keeps the response open.
+3. Incoming SSE frames are parsed and applied: `TEXT_MESSAGE_CONTENT` deltas accumulate
+   into assistant messages, `TOOL_CALL_ARGS` into tool-call arguments, `STATE_SNAPSHOT`
+   into `agent.state`.
+4. Every raw event is re-emitted to subscribers — which is how two components can watch
+   the same stream independently.
+5. `agent.isRunning` flips false on `RUN_FINISHED` or `RUN_ERROR`.
 
-## Learn More
+## Technologies
 
-To learn more about Next.js, take a look at the following resources:
+| Package                  | Version | Role                         |
+| ------------------------ | ------- | ---------------------------- |
+| `next`                   | 16.4.6  | App router, API route        |
+| `react`                  | 19.3.0  | UI                           |
+| `@copilotkit/runtime`    | 1.89.0  | HTTP handler, agent registry |
+| `@copilotkit/react-core` | 1.89.0  | `useAgent`, `useCopilotKit`  |
+| `@ag-ui/langgraph`       | 0.0.46  | Server-side protocol adapter |
+| `@ag-ui/client`          | 1.0.5   | Browser-side event consumer  |
+| `react-markdown`         | —       | Renders assistant text       |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Environment
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Variable                   | Required | Default                 | Purpose                          |
+| -------------------------- | -------- | ----------------------- | -------------------------------- |
+| `LANGGRAPH_DEPLOYMENT_URL` | no       | `http://localhost:8123` | Where the LangGraph server lives |
 
-## Deploy on Vercel
+Put overrides in `frontend/.env.local`. No API key is needed here — `DEEPSEEK_API_KEY`
+lives in `agent/.env` and never reaches the browser.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Running
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm install
+npm run dev
+```
+
+Open <http://localhost:3000>. Start the agent first — see [`../agent`](../agent).
+Requirements: Node.js 20+, port 3000 free, and the agent reachable on 8123.
+
+Other scripts: `npm run build`, `npm run start`, `npm run lint`.
+
+## How events reach the UI
+
+`chat.tsx` and `ag-ui-panel.tsx` each call `agent.subscribe({ onEvent })` on the
+`AbstractAgent` returned by `useAgent`. Two independent consumers of one stream:
+
+- **`chat.tsx`** switches on `RUN_STARTED`, `TOOL_CALL_START`, `TOOL_CALL_RESULT`,
+  `TEXT_MESSAGE_START`, `RUN_FINISHED`, `RUN_ERROR` to drive the status line.
+  Transcript content comes from `agent.messages`, not from raw events.
+- **`ag-ui-panel.tsx`** logs every event received, colour-coded by family, merging
+  `TEXT_MESSAGE_CONTENT` and `TOOL_CALL_ARGS` deltas into single rows. Events it has no
+  formatter for still appear, by type with an empty detail column.
+
+Adding a status state means adding a `case` to the switch in `useAgentStatus`.
+
+## Adding a tool card
+
+Add an entry to the `TOOLS` map in `chat.tsx`:
+
+```ts
+const TOOLS: Record<string, ToolMeta> = {
+  get_weather: { icon: "🌤️", title: (a) => `Weather · ${a.city}` },
+};
+```
+
+The tool name arrives in `TOOL_CALL_START`, so the card renders automatically once the
+agent starts calling it. Tools without an entry fall back to pretty-printed JSON.
+
+## Notes
+
+- **No auth.** The route accepts unauthenticated requests.
+- `InMemoryAgentRunner` keeps thread state in process memory only.
+- Security, persistence, multi-user handling, and deployment are out of scope by design.
+  See [Scope](../README.md#scope); the rest is on your end.
+- This is a Next.js 16 app; several conventions differ from older versions. `AGENTS.md`
+  points at the bundled docs in `node_modules/next/dist/docs/`.
+
+## License
+
+See [LICENSE](../LICENSE). Free for personal, educational, research, and non-commercial
+use. **Commercial use requires permission first.**
