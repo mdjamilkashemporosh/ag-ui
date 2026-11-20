@@ -67,6 +67,10 @@ const getWeather = tool(async ({ city }) => `It's 28°C and sunny in ${city}.`, 
 To add a tool, define it the same way and append it to the `tools` array. The graph needs
 no other change — the conditional edge already handles any number of tool calls.
 
+The tool's `name` is also the key the frontend uses to pick a card, so a new tool renders
+with a generic card unless you add a matching entry on the client. See
+[Tool-based generative UI](../frontend/README.md#tool-based-generative-ui).
+
 ## Environment
 
 | Variable           | Required | Purpose                 |

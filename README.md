@@ -25,11 +25,14 @@ reply — is streamed to the browser as a typed AG-UI event, and rendered twice:
 2. As a raw event log you can read line by line.
 
 ---
-## Demo 
+
+## Preview
+
 <img width="1000" height="375" alt="image" src="https://github.com/user-attachments/assets/4832b0b9-eb7d-45b9-91bb-4afe77f1a727" />
 <img width="1000" height="464" alt="image" src="https://github.com/user-attachments/assets/3981da8a-e6d6-45f9-83e9-0939a8fcb92a" />
 
 ---
+
 ## How it works
 
 ```mermaid
@@ -191,6 +194,54 @@ There is no root `package.json`; each directory installs independently.
 
 ---
 
+## Generative UI
+
+The UI is not a fixed transcript. The agent decides which tool to call, and the client
+renders a component for that tool — tool choice and arguments are generated, the
+components are yours.
+
+```
+agent calls get_weather({ city: "Dhaka" })
+        |
+        |  TOOL_CALL_START / TOOL_CALL_ARGS
+        v
+chat.tsx looks up TOOLS["get_weather"]
+        |
+        v
+ToolCard with icon, title, and result
+```
+
+Three pieces make it work, all in `chat.tsx`:
+
+| Piece       | Role                                                                 |
+| ----------- | -------------------------------------------------------------------- |
+| `TOOLS` map | tool name → icon and title builder                                   |
+| `ToolCard`  | renders state (`Queued` / `Running` / `Done`), arguments, and result |
+| fallback    | tools with no map entry print pretty-printed JSON                    |
+
+```ts
+const TOOLS: Record<string, ToolMeta> = {
+  get_weather: {
+    icon: "🌤️",
+    title: (a) => `Weather · ${typeof a.city === "string" ? a.city : "…"}`,
+  },
+};
+```
+
+Adding a tool means defining it in the agent and adding one entry here. Nothing else
+changes: `TOOL_CALL_START` carries the name, the card appears when the agent starts
+calling it, and the arguments stream into the title as `TOOL_CALL_ARGS` arrives.
+
+The mechanism is the same one CopilotKit exposes as `useRenderTool`; here it is wired
+directly, with no extra dependency and no provider setup.
+
+**Scope of the generation.** This is tool-based: the agent chooses among tools you
+registered and supplies their arguments. It cannot invent UI. Free-form generation — the
+agent emitting a UI specification — is a different mechanism and is not wired here; see
+A2UI under [Scope](#scope).
+
+---
+
 ## Event translation
 
 `@ag-ui/langgraph` maps LangGraph's native stream onto AG-UI event types:
@@ -250,7 +301,8 @@ is intentionally left to you.
 
 - Two-process wiring between a LangGraph graph and a React client
 - Protocol translation from LangGraph's stream to AG-UI events
-- Streaming chat UI with tool cards and a live event inspector
+- Streaming chat UI with a live event inspector
+- Tool-based generative UI — the agent picks the tool, the UI renders it
 - Tool extension without touching the translator
 
 ### Left to you
@@ -265,8 +317,9 @@ is intentionally left to you.
   local development only.
 - **Observability and cost control.** Token usage is available in the protocol but neither
   surfaced nor enforced. No tracing, metrics, or alerting.
-- **Generative UI.** A2UI packages are present in `node_modules` but nothing is wired to
-  them; the agent cannot emit UI.
+- **Free-form generative UI.** Tool-based rendering is implemented (see
+  [Generative UI](#generative-ui)). A2UI packages are present in `node_modules` but nothing
+  is wired to them, so the agent cannot emit a UI specification of its own.
 
 Treat this as a reference for the wiring, not as something to expose unchanged.
 

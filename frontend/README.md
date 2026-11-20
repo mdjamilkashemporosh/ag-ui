@@ -102,7 +102,21 @@ Other scripts: `npm run build`, `npm run start`, `npm run lint`.
 
 Adding a status state means adding a `case` to the switch in `useAgentStatus`.
 
-## Adding a tool card
+## Tool-based generative UI
+
+The agent decides which tool to call and with what arguments; this client decides how that
+tool is drawn. Nothing in the UI is hardcoded to a conversation — the card appears because
+the agent chose to call `get_weather`, and it fills in as arguments and results stream in.
+
+| Step | What happens                                                                     |
+| ---- | -------------------------------------------------------------------------------- |
+| 1    | `TOOL_CALL_START` arrives with `toolCallName`                                    |
+| 2    | `TOOL_CALL_ARGS` deltas accumulate — parsed on each render, invalid JSON ignored |
+| 3    | `TOOLS[name]` supplies the icon and title                                        |
+| 4    | `ToolCard` renders `Queued` → `Running`                                          |
+| 5    | `TOOL_CALL_RESULT` arrives, matched by `toolCallId` → state becomes `Done`       |
+
+### Adding a tool card
 
 Add an entry to the `TOOLS` map in `chat.tsx`:
 
@@ -113,7 +127,15 @@ const TOOLS: Record<string, ToolMeta> = {
 ```
 
 The tool name arrives in `TOOL_CALL_START`, so the card renders automatically once the
-agent starts calling it. Tools without an entry fall back to pretty-printed JSON.
+agent starts calling it. Tools without an entry fall back to pretty-printed JSON, so an
+unmapped tool degrades gracefully rather than breaking the thread.
+
+This is the same mechanism CopilotKit exposes as `useRenderTool`, wired directly: one map,
+one component, no provider and no extra dependency. If you want a bespoke component per
+tool rather than a shared card, that hook is the natural upgrade path.
+
+**Limit:** tool-based only. The agent picks among tools you registered — it cannot emit a
+UI specification of its own. Free-form generation is not wired here.
 
 ## Notes
 
